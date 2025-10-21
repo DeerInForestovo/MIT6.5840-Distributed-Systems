@@ -128,9 +128,11 @@ func DoReduceTask(task RequestTaskReply, reducef func(string, []string) string) 
 	}
 
 	sort.Sort(ByKey(intermediate))
-
-	oname := fmt.Sprintf("mr-out-%d", task.TaskId)
-	ofile, _ := os.Create(oname)
+	tmpFile, err := os.CreateTemp("", fmt.Sprintf("mr-out-%d-*", task.TaskId))
+	if err != nil {
+		log.Fatalf("Cannot create temp file: %v", err)
+	}
+	defer tmpFile.Close()
 
 	i := 0
 	for i < len(intermediate) {
@@ -143,11 +145,13 @@ func DoReduceTask(task RequestTaskReply, reducef func(string, []string) string) 
 			values = append(values, intermediate[k].Value)
 		}
 		output := reducef(intermediate[i].Key, values)
-		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+		fmt.Fprintf(tmpFile, "%v %v\n", intermediate[i].Key, output)
 		i = j
 	}
 
-	ofile.Close()
+	finalName := fmt.Sprintf("mr-out-%d", task.TaskId)
+	os.Rename(tmpFile.Name(), finalName)
+
 	ReportTaskDone(task)
 }
 
