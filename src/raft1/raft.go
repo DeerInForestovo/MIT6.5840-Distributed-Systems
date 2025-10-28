@@ -324,13 +324,18 @@ func (rf *Raft) killed() bool {
 func (rf *Raft) ticker() {
 	for !rf.killed() {
 		rf.mu.Lock()
-		if time.Now().After(rf.electionDue) && rf.state != Leader {
-			rf.mu.Unlock()
-			rf.startElection()
+		state := rf.state
+		rf.mu.Unlock()
+
+		if state == Leader {
+			rf.sendHeartbeats()
+			time.Sleep(100 * time.Millisecond)
 		} else {
-			rf.mu.Unlock()
+			if time.Now().After(rf.electionDue) {
+				rf.startElection()
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
