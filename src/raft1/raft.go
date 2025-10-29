@@ -8,12 +8,14 @@ package raft
 
 import (
 	// "bytes"
+	"bytes"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	// "6.5840/labgob"
+	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
 	tester "6.5840/tester1"
@@ -80,42 +82,36 @@ func (rf *Raft) GetState() (int, bool) {
 	return rf.currentTerm, rf.state == Leader
 }
 
-// save Raft's persistent state to stable storage,
-// where it can later be retrieved after a crash and restart.
-// see paper's Figure 2 for a description of what should be persistent.
-// before you've implemented snapshots, you should pass nil as the
-// second argument to persister.Save().
-// after you've implemented snapshots, pass the current snapshot
-// (or nil if there's not yet a snapshot).
+// Save Raft's persistent state.
 func (rf *Raft) persist() {
-	// Your code here (3C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	data := w.Bytes()
+	rf.persister.Save(data, nil)
 }
 
-// restore previously persisted state.
+// Restore previously persisted state.
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	if len(data) == 0 {
 		return
 	}
-	// Your code here (3C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm int
+	var votedFor int
+	var log []LogEntry
+	if d.Decode(&currentTerm) != nil ||
+		d.Decode(&votedFor) != nil ||
+		d.Decode(&log) != nil {
+		// optional: log or panic
+	} else {
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.log = log
+	}
 }
 
 // how many bytes in Raft's persisted log?
@@ -186,6 +182,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	} else {
 		reply.VoteGranted = false
 	}
+
+	rf.persist()
 }
 
 // Send requestVote to other servers.
@@ -203,14 +201,12 @@ func (rf *Raft) startElection() {
 	rf.votedFor = rf.me
 	rf.votes = 1
 	rf.resetElectionTimer()
-
-	// compute last log index/term while holding the lock so values reflect
-	// the candidate's current log state (prevents sending stale/zero values)
 	lastIndex := len(rf.log)
 	lastTerm := 0
 	if lastIndex > 0 {
 		lastTerm = rf.log[lastIndex-1].Term
 	}
+	rf.persist()
 	rf.mu.Unlock()
 
 	args := RequestVoteArgs{
@@ -242,6 +238,7 @@ func (rf *Raft) startElection() {
 				rf.currentTerm = reply.Term
 				rf.state = Follower
 				rf.votedFor = -1
+				rf.persist()
 				rf.resetElectionTimer()
 				rf.mu.Unlock()
 				return
@@ -257,6 +254,7 @@ func (rf *Raft) startElection() {
 							rf.matchIndex[i] = 0
 						}
 						rf.resetElectionTimer()
+						rf.persist()
 						rf.mu.Unlock()
 						rf.broadcastAppendEntries()
 						return
@@ -338,6 +336,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	reply.Success = true
 	reply.Term = rf.currentTerm
+
+	rf.persist()
 }
 
 // Leader send the log to one follower server.
@@ -383,6 +383,7 @@ func (rf *Raft) sendAppendEntries(server int, term int) {
 		rf.currentTerm = reply.Term
 		rf.state = Follower
 		rf.votedFor = -1
+		rf.persist()
 		rf.resetElectionTimer()
 		return
 	}
@@ -409,11 +410,14 @@ func (rf *Raft) sendAppendEntries(server int, term int) {
 				break
 			}
 		}
+
+		rf.persist()
 	} else {
 		// If fail, the leader minus the follower's nextIndex by one, until their logs match.
 		// Can do better by defining the reply.
 		if rf.nextIndex[server] > 1 {
 			rf.nextIndex[server]--
+			rf.persist()
 		}
 	}
 }
