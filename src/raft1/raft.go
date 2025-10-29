@@ -203,13 +203,21 @@ func (rf *Raft) startElection() {
 	rf.votedFor = rf.me
 	rf.votes = 1
 	rf.resetElectionTimer()
+
+	// compute last log index/term while holding the lock so values reflect
+	// the candidate's current log state (prevents sending stale/zero values)
+	lastIndex := len(rf.log)
+	lastTerm := 0
+	if lastIndex > 0 {
+		lastTerm = rf.log[lastIndex-1].Term
+	}
 	rf.mu.Unlock()
 
 	args := RequestVoteArgs{
 		Term:         term,
 		CandidateId:  rf.me,
-		LastLogIndex: 0,
-		LastLogTerm:  0,
+		LastLogIndex: lastIndex,
+		LastLogTerm:  lastTerm,
 	}
 
 	for i := range rf.peers {
@@ -254,8 +262,8 @@ func (rf *Raft) startElection() {
 						return
 					}
 				}
-				rf.mu.Unlock()
 			}
+			rf.mu.Unlock()
 		}(i)
 	}
 }
@@ -478,6 +486,7 @@ func (rf *Raft) ticker() {
 			time.Sleep(100 * time.Millisecond)
 		} else {
 			if time.Now().After(rf.electionDue) {
+				rf.resetElectionTimer()
 				rf.startElection()
 			}
 			time.Sleep(10 * time.Millisecond)
