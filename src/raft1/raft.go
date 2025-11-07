@@ -363,8 +363,8 @@ func (rf *Raft) startElection() {
 				rf.state = Follower
 				rf.votedFor = -1
 				rf.persist()
-				rf.mu.Unlock()
 				rf.resetElectionTimer()
+				rf.mu.Unlock()
 				return
 			}
 
@@ -377,8 +377,8 @@ func (rf *Raft) startElection() {
 							rf.nextIndex[i] = rf.lastIndex() + 1
 							rf.matchIndex[i] = rf.lastIncludedIndex
 						}
-						rf.mu.Unlock()
 						rf.resetElectionTimer()
+						rf.mu.Unlock()
 						rf.broadcastAppendEntries()
 						return
 					}
@@ -649,9 +649,13 @@ func (rf *Raft) ticker() {
 			rf.broadcastAppendEntries()
 			time.Sleep(100 * time.Millisecond)
 		} else {
+			rf.mu.Lock()
 			if time.Now().After(rf.electionDue) {
 				rf.resetElectionTimer()
+				rf.mu.Unlock()
 				rf.startElection()
+			} else {
+				rf.mu.Unlock()
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
