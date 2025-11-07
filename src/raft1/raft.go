@@ -81,7 +81,7 @@ func (rf *Raft) toSliceIndex(index int) int {
 
 // helper function reset election timer
 func (rf *Raft) resetElectionTimer() {
-	timeout := time.Duration(100+rand.Intn(200)) * time.Millisecond
+	timeout := time.Duration(300+rand.Intn(300)) * time.Millisecond
 	rf.electionDue = time.Now().Add(timeout)
 }
 
