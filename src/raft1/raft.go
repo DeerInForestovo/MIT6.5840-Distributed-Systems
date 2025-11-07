@@ -42,10 +42,6 @@ type Raft struct {
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
 
-	// Your data here (3A, 3B, 3C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
-
 	// Persistent state on all servers
 	currentTerm int
 	votedFor    int
@@ -452,9 +448,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	if prevTerm != args.PrevLogTerm {
-		// prevLogTerm dismatch
-
-		// find first index of conflict term
+		// prevLogTerm mismatch; find first index of conflict term
 		conflictTerm := rf.log[args.PrevLogIndex].Term
 		conflictIndex := args.PrevLogIndex
 		for conflictIndex > 0 && rf.log[rf.toSliceIndex(conflictIndex-1)].Term == conflictTerm {
@@ -462,10 +456,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 		reply.ConflictTerm = conflictTerm
 		reply.ConflictIndex = conflictIndex
-
-		// delete unmatched log entries
-		// rf.log = rf.log[:args.PrevLogIndex]
-		// rf.persist()
 		return
 	}
 
