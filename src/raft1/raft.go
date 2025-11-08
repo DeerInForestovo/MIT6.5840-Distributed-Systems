@@ -148,7 +148,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if index <= rf.lastIncludedIndex {
+	if index <= rf.lastIncludedIndex || index > rf.lastIndex() {
 		return
 	}
 
@@ -183,26 +183,32 @@ type InstallSnapshotReply struct {
 // Follower install snapshot from leader.
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
 
-	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
+		rf.mu.Unlock()
 		return
 	}
 
-	rf.state = Follower
-	rf.currentTerm = args.Term
-	rf.votedFor = -1
-	rf.resetElectionTimer()
+	if args.Term > rf.currentTerm {
+		rf.state = Follower
+		rf.currentTerm = args.Term
+		rf.votedFor = -1
+		rf.resetElectionTimer()
+	}
 
-	if args.LastIncludedIndex > rf.lastIndex() {
+	reply.Term = rf.currentTerm
+
+	if args.LastIncludedIndex <= rf.lastIncludedIndex {
+		rf.mu.Unlock()
+		return
+	}
+	if args.LastIncludedIndex >= rf.lastIndex() {
 		// Snapshot covers the whole log
 		rf.log = []LogEntry{{Term: args.LastIncludedTerm}}
 	} else {
 		// Truncate existing log to start from snapshot
-		sliceIdx := rf.toSliceIndex(args.LastIncludedIndex)
-		rf.log = rf.log[sliceIdx:]
-		rf.log[0].Term = args.LastIncludedTerm
+		sliceIdx := rf.toSliceIndex(args.LastIncludedIndex + 1)
+		rf.log = append([]LogEntry{{Term: args.LastIncludedTerm}}, rf.log[sliceIdx:]...)
 	}
 	rf.lastIncludedIndex = args.LastIncludedIndex
 	rf.lastIncludedTerm = args.LastIncludedTerm
@@ -212,21 +218,27 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.commitIndex = max(rf.commitIndex, rf.lastIncludedIndex)
 
 	rf.persist()
-	rf.applyCh <- raftapi.ApplyMsg{
+
+	msg := raftapi.ApplyMsg{
 		SnapshotValid: true,
 		Snapshot:      rf.snapshot,
 		SnapshotTerm:  rf.lastIncludedTerm,
 		SnapshotIndex: rf.lastIncludedIndex,
 	}
+
+	rf.mu.Unlock()
+	rf.applyCh <- msg
 }
 
 // Leader send InstallSnapshot RPC to follower.
-func (rf *Raft) sendInstallSnapshot(server int) {
-	if rf.state != Leader {
+func (rf *Raft) sendInstallSnapshot(server int, term int) {
+	rf.mu.Lock()
+
+	if rf.state != Leader || term != rf.currentTerm {
+		rf.mu.Unlock()
 		return
 	}
 
-	rf.mu.Lock()
 	args := InstallSnapshotArgs{
 		Term:              rf.currentTerm,
 		LeaderId:          rf.me,
@@ -449,7 +461,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	if prevTerm != args.PrevLogTerm {
 		// prevLogTerm mismatch; find first index of conflict term
-		conflictTerm := rf.log[args.PrevLogIndex].Term
+		conflictTerm := rf.log[rf.toSliceIndex(args.PrevLogIndex)].Term
 		conflictIndex := args.PrevLogIndex
 		for conflictIndex > 0 && rf.log[rf.toSliceIndex(conflictIndex-1)].Term == conflictTerm {
 			conflictIndex--
@@ -498,7 +510,7 @@ func (rf *Raft) sendAppendEntries(server int, term int) {
 
 	if rf.nextIndex[server] <= rf.lastIncludedIndex {
 		rf.mu.Unlock()
-		go rf.sendInstallSnapshot(server)
+		go rf.sendInstallSnapshot(server, term)
 		return
 	}
 
