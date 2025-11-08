@@ -103,7 +103,7 @@ func (rf *Raft) persist() {
 	e.Encode(rf.lastIncludedIndex)
 	e.Encode(rf.lastIncludedTerm)
 	data := w.Bytes()
-	rf.persister.Save(data, rf.snapshot)
+	rf.persister.Save(data, append([]byte(nil), rf.snapshot...))
 }
 
 // Restore previously persisted state.
@@ -129,6 +129,9 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.lastIncludedTerm = lastIncludedTerm
 	rf.snapshot = rf.persister.ReadSnapshot()
 
+	if rf.snapshot == nil {
+		rf.snapshot = make([]byte, 0)
+	}
 	if len(rf.log) == 0 {
 		rf.log = append(rf.log, LogEntry{Term: rf.lastIncludedTerm})
 	}
@@ -212,7 +215,11 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 	rf.lastIncludedIndex = args.LastIncludedIndex
 	rf.lastIncludedTerm = args.LastIncludedTerm
+
 	rf.snapshot = args.Snapshot
+	if rf.snapshot == nil {
+		rf.snapshot = make([]byte, 0)
+	}
 
 	rf.lastApplied = rf.lastIncludedIndex
 	rf.commitIndex = rf.lastIncludedIndex
@@ -221,7 +228,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	msg := raftapi.ApplyMsg{
 		SnapshotValid: true,
-		Snapshot:      rf.snapshot,
+		Snapshot:      append([]byte(nil), rf.snapshot...),
 		SnapshotTerm:  rf.lastIncludedTerm,
 		SnapshotIndex: rf.lastIncludedIndex,
 	}
