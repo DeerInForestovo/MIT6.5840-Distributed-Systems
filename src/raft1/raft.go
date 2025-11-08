@@ -214,8 +214,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.lastIncludedTerm = args.LastIncludedTerm
 	rf.snapshot = args.Snapshot
 
-	rf.lastApplied = max(rf.lastApplied, rf.lastIncludedIndex)
-	rf.commitIndex = max(rf.commitIndex, rf.lastIncludedIndex)
+	rf.lastApplied = rf.lastIncludedIndex
+	rf.commitIndex = rf.lastIncludedIndex
 
 	rf.persist()
 
