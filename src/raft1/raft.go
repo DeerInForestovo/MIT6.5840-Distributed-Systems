@@ -470,7 +470,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		// prevLogTerm mismatch; find first index of conflict term
 		conflictTerm := rf.log[rf.toSliceIndex(args.PrevLogIndex)].Term
 		conflictIndex := args.PrevLogIndex
-		for conflictIndex > 0 && rf.log[rf.toSliceIndex(conflictIndex-1)].Term == conflictTerm {
+		for rf.toSliceIndex(conflictIndex) > 0 && rf.log[rf.toSliceIndex(conflictIndex)-1].Term == conflictTerm {
 			conflictIndex--
 		}
 		reply.ConflictTerm = conflictTerm
