@@ -22,24 +22,20 @@ type KVServer struct {
 	version map[string]rpc.Tversion
 }
 
-// To type-cast req to the right type, take a look at Go's type switches or type
-// assertions below:
-//
-// https://go.dev/tour/methods/16
-// https://go.dev/tour/methods/15
+// DoOp applies the operation to the key-value store.
 func (kv *KVServer) DoOp(req any) any {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
 	switch args := req.(type) {
-	case rpc.GetArgs:
+	case *rpc.GetArgs:
 		val, ok := kv.data[args.Key]
 		if !ok {
 			return rpc.GetReply{Err: rpc.ErrNoKey}
 		}
 		ver := kv.version[args.Key]
 		return rpc.GetReply{Value: val, Version: ver, Err: rpc.OK}
-	case rpc.PutArgs:
+	case *rpc.PutArgs:
 		ver, ok := kv.version[args.Key]
 		if !ok {
 			ver = 0
@@ -66,10 +62,7 @@ func (kv *KVServer) Restore(data []byte) {
 }
 
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
-	// Your code here. Use kv.rsm.Submit() to submit args
-	// You can use go's type casts to turn the any return value
-	// of Submit() into a GetReply: rep.(rpc.GetReply)
-	err, rep := kv.rsm.Submit(*args)
+	err, rep := kv.rsm.Submit(args)
 	if err != rpc.OK {
 		reply.Err = err
 		return
@@ -78,10 +71,7 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 }
 
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
-	// Your code here. Use kv.rsm.Submit() to submit args
-	// You can use go's type casts to turn the any return value
-	// of Submit() into a PutReply: rep.(rpc.PutReply)
-	err, rep := kv.rsm.Submit(*args)
+	err, rep := kv.rsm.Submit(args)
 	if err != rpc.OK {
 		reply.Err = err
 		return
@@ -89,14 +79,7 @@ func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 	*reply = rep.(rpc.PutReply)
 }
 
-// the tester calls Kill() when a KVServer instance won't
-// be needed again. for your convenience, we supply
-// code to set rf.dead (without needing a lock),
-// and a killed() method to test rf.dead in
-// long-running loops. you can also add your own
-// code to Kill(). you're not required to do anything
-// about this, but it may be convenient (for example)
-// to suppress debug output from a Kill()ed instance.
+// Kill() is called by the tester when a KVServer instance
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	// Your code here, if desired.
