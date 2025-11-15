@@ -1,6 +1,7 @@
 package rsm
 
 import (
+	"reflect"
 	"sync"
 	"time"
 
@@ -64,6 +65,15 @@ func (rsm *RSM) Raft() raftapi.Raft {
 
 // Submit a command to Raft, and wait for it to be committed.
 func (rsm *RSM) Submit(req any) (rpc.Err, any) {
+	// Tester Bug?
+	// Sometimes req is not a pointer type
+	rv := reflect.ValueOf(req)
+	if rv.Kind() != reflect.Pointer {
+		ptr := reflect.New(rv.Type())
+		ptr.Elem().Set(rv)
+		req = ptr.Interface()
+	}
+
 	op := Op{
 		Me:  rsm.me,
 		Id:  time.Now().UnixNano(),
@@ -142,6 +152,8 @@ func (rsm *RSM) handleCommand(msg raftapi.ApplyMsg) {
 func (rsm *RSM) handleSnapshot(msg raftapi.ApplyMsg) {
 	rsm.mu.Lock()
 	defer rsm.mu.Unlock()
+
+	print("restore??\n")
 
 	if msg.SnapshotIndex <= rsm.lastApplied {
 		return

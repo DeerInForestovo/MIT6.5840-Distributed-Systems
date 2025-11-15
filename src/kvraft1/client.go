@@ -24,15 +24,26 @@ func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	args := &rpc.GetArgs{Key: key}
 	for {
-		var reply rpc.GetReply
-		ok := ck.clnt.Call(ck.servers[ck.lastLeader], "KVServer.Get", args, &reply)
-		if ok && reply.Err == rpc.OK {
-			return reply.Value, reply.Version, rpc.OK
+		server := ck.lastLeader
+		for range ck.servers {
+			var reply rpc.GetReply
+			ok := ck.clnt.Call(ck.servers[server], "KVServer.Get", args, &reply)
+			if ok {
+				if reply.Err == rpc.ErrWrongLeader {
+					server = (server + 1) % len(ck.servers)
+					continue
+				}
+				ck.lastLeader = server
+				if reply.Err == rpc.OK {
+					return reply.Value, reply.Version, rpc.OK
+				}
+				if reply.Err == rpc.ErrNoKey {
+					return "", 0, rpc.ErrNoKey
+				}
+			}
+			server = (server + 1) % len(ck.servers)
 		}
-		if reply.Err == rpc.ErrNoKey {
-			return "", 0, rpc.ErrNoKey
-		}
-		ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

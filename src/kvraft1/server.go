@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -26,6 +27,15 @@ type KVServer struct {
 func (kv *KVServer) DoOp(req any) any {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+
+	// Tester Bug?
+	// Sometimes req is not a pointer type
+	rv := reflect.ValueOf(req)
+	if rv.Kind() != reflect.Pointer {
+		ptr := reflect.New(rv.Type())
+		ptr.Elem().Set(rv)
+		req = ptr.Interface()
+	}
 
 	switch args := req.(type) {
 	case *rpc.GetArgs:
@@ -67,7 +77,14 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 		reply.Err = err
 		return
 	}
-	*reply = rep.(rpc.GetReply)
+	if rep == nil {
+		reply.Err = rpc.ErrWrongLeader
+		return
+	}
+	r := rep.(rpc.GetReply)
+	reply.Value = r.Value
+	reply.Version = r.Version
+	reply.Err = r.Err
 }
 
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
@@ -76,7 +93,12 @@ func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 		reply.Err = err
 		return
 	}
-	*reply = rep.(rpc.PutReply)
+	if rep == nil {
+		reply.Err = rpc.ErrWrongLeader
+		return
+	}
+	r := rep.(rpc.PutReply)
+	reply.Err = r.Err
 }
 
 // Kill() is called by the tester when a KVServer instance
