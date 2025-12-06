@@ -164,7 +164,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.log = newLog
 	rf.lastIncludedIndex = snapshotIndex
 	rf.lastIncludedTerm = snapshotTerm
-	rf.snapshot = append([]byte(nil), rf.snapshot...)
+	rf.snapshot = append([]byte(nil), snapshot...)
 
 	rf.persist()
 }
