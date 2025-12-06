@@ -170,14 +170,17 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 	labgob.Register(rsm.Op{})
 	labgob.Register(rpc.PutArgs{})
 	labgob.Register(rpc.GetArgs{})
+	labgob.Register(rpc.PutReply{})
+	labgob.Register(rpc.GetReply{})
 
 	kv := &KVServer{me: me}
 
-	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
 	kv.data = make(map[string]string)
 	kv.version = make(map[string]rpc.Tversion)
 	kv.lastAppliedSeqNum = make(map[int64]int64)
 	kv.lastPutResult = make(map[int64]rpc.PutReply)
+
+	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
 
 	return []tester.IService{kv, kv.rsm.Raft()}
 }

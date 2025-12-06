@@ -56,6 +56,11 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
 	}
 
+	snapshot := persister.ReadSnapshot()
+	if len(snapshot) > 0 {
+		rsm.sm.Restore(snapshot)
+	}
+
 	go rsm.applier()
 	return rsm
 }
@@ -86,6 +91,13 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 
 	select {
 	case result := <-notifyCh:
+		// Do NOT check leadership here.
+		// Even if this server has lost leadership, the command may have been committed.
+
+		// If result is nil, it means the command was included in a snapshot.
+		if result == nil {
+			return rpc.ErrWrongLeader, nil
+		}
 		return rpc.OK, result
 	case <-time.After(2000 * time.Millisecond):
 		rsm.mu.Lock()
@@ -156,6 +168,7 @@ func (rsm *RSM) handleSnapshot(msg raftapi.ApplyMsg) {
 	// Remove notifyCh and pendingOps for indices included in snapshot
 	for index, ch := range rsm.notifyCh {
 		if index <= rsm.lastApplied {
+			ch <- nil
 			close(ch)
 			// If there's an op.Id mapped to this index, remove pendingOps too
 			if opId, ok := rsm.indexToOp[index]; ok {
