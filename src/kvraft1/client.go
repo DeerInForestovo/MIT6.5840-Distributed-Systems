@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"math/rand"
 	"time"
 
 	"6.5840/kvsrv1/rpc"
@@ -13,16 +14,30 @@ type Clerk struct {
 	servers []string
 
 	lastLeader int // last known leader server index
+
+	clientId int64
+	seqNum   int64
 }
 
 func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
-	ck := &Clerk{clnt: clnt, servers: servers, lastLeader: 0}
+	ck := &Clerk{
+		clnt:       clnt,
+		servers:    servers,
+		lastLeader: 0,
+		clientId:   rand.Int63(),
+		seqNum:     1,
+	}
 	return ck
 }
 
 // Get fetches the current value and version for a key.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
-	args := &rpc.GetArgs{Key: key}
+	ck.seqNum++
+	args := &rpc.GetArgs{
+		Key:      key,
+		ClientId: ck.clientId,
+		SeqNum:   ck.seqNum,
+	}
 	for {
 		server := ck.lastLeader
 		for range ck.servers {
@@ -50,7 +65,14 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // Put updates key with value only if the version in the
 // request matches the version of the key at the server.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
-	args := &rpc.PutArgs{Key: key, Value: value, Version: version}
+	ck.seqNum++
+	args := &rpc.PutArgs{
+		Key:      key,
+		Value:    value,
+		Version:  version,
+		ClientId: ck.clientId,
+		SeqNum:   ck.seqNum,
+	}
 	retried := false
 	for {
 		server := ck.lastLeader

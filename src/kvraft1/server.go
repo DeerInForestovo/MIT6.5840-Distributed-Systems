@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"bytes"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -18,9 +19,11 @@ type KVServer struct {
 	rsm  *rsm.RSM
 
 	// Your definitions here.
-	mu      sync.Mutex
-	data    map[string]string
-	version map[string]rpc.Tversion
+	mu                sync.Mutex
+	data              map[string]string
+	version           map[string]rpc.Tversion
+	lastAppliedSeqNum map[int64]int64
+	lastPutResult     map[int64]rpc.PutReply
 }
 
 // DoOp applies the operation to the key-value store.
@@ -46,16 +49,34 @@ func (kv *KVServer) DoOp(req any) any {
 		ver := kv.version[args.Key]
 		return rpc.GetReply{Value: val, Version: ver, Err: rpc.OK}
 	case *rpc.PutArgs:
+		clientId := args.ClientId
+		seqNum := args.SeqNum
+
+		if lastSeq, ok := kv.lastAppliedSeqNum[clientId]; ok {
+			if seqNum <= lastSeq {
+				return kv.lastPutResult[clientId]
+			}
+		}
+
 		ver, ok := kv.version[args.Key]
 		if !ok {
 			ver = 0
 		}
+		reply := rpc.PutReply{}
 		if args.Version != ver {
-			return rpc.PutReply{Err: rpc.ErrVersion}
+			reply.Err = rpc.ErrVersion
+		} else {
+			kv.data[args.Key] = args.Value
+			kv.version[args.Key] = ver + 1
+			reply.Err = rpc.OK
 		}
-		kv.data[args.Key] = args.Value
-		kv.version[args.Key] = ver + 1
-		return rpc.PutReply{Err: rpc.OK}
+
+		if reply.Err == rpc.OK || reply.Err == rpc.ErrVersion {
+			kv.lastAppliedSeqNum[clientId] = seqNum
+			kv.lastPutResult[clientId] = reply
+		}
+
+		return reply
 	}
 
 	// Should never reach here
@@ -63,12 +84,39 @@ func (kv *KVServer) DoOp(req any) any {
 }
 
 func (kv *KVServer) Snapshot() []byte {
-	// Your code here
-	return nil
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	// encode maps
+	e.Encode(kv.data)
+	e.Encode(kv.version)
+	e.Encode(kv.lastAppliedSeqNum)
+	e.Encode(kv.lastPutResult)
+	return w.Bytes()
 }
 
 func (kv *KVServer) Restore(data []byte) {
-	// Your code here
+	if len(data) == 0 {
+		return
+	}
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var dataMap map[string]string
+	var verMap map[string]rpc.Tversion
+	var lastAppliedSeqNumMap map[int64]int64
+	var lastPutResultMap map[int64]rpc.PutReply
+	if d.Decode(&dataMap) != nil || d.Decode(&verMap) != nil || d.Decode(&lastAppliedSeqNumMap) != nil || d.Decode(&lastPutResultMap) != nil {
+		return
+	}
+	kv.data = dataMap
+	kv.version = verMap
+	kv.lastAppliedSeqNum = lastAppliedSeqNumMap
+	kv.lastPutResult = lastPutResultMap
 }
 
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
@@ -126,6 +174,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
 	kv.data = make(map[string]string)
 	kv.version = make(map[string]rpc.Tversion)
+	kv.lastAppliedSeqNum = make(map[int64]int64)
+	kv.lastPutResult = make(map[int64]rpc.PutReply)
 
 	return []tester.IService{kv, kv.rsm.Raft()}
 }

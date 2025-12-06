@@ -35,6 +35,7 @@ type RSM struct {
 
 	notifyCh    map[int]chan any  // Channels to notify waiting Submit calls
 	pendingOps  map[int64]Op      // Track pending ops by unique Id
+	indexToOp   map[int]int64     // map log index -> op.Id
 	lastApplied int               // Last applied log index
 	persister   *tester.Persister // Persister to hold snapshot
 }
@@ -49,6 +50,7 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		persister:    persister,
 		notifyCh:     make(map[int]chan any),
 		pendingOps:   make(map[int64]Op),
+		indexToOp:    make(map[int]int64),
 	}
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
@@ -79,6 +81,7 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	notifyCh := make(chan any, 1)
 	rsm.notifyCh[index] = notifyCh
 	rsm.pendingOps[op.Id] = op
+	rsm.indexToOp[index] = op.Id
 	rsm.mu.Unlock()
 
 	select {
@@ -92,6 +95,7 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 		rsm.mu.Lock()
 		delete(rsm.notifyCh, index)
 		delete(rsm.pendingOps, op.Id)
+		delete(rsm.indexToOp, index)
 		rsm.mu.Unlock()
 		return rpc.ErrWrongLeader, nil
 	}
@@ -130,6 +134,7 @@ func (rsm *RSM) handleCommand(msg raftapi.ApplyMsg) {
 			delete(rsm.notifyCh, msg.CommandIndex)
 		}
 		delete(rsm.pendingOps, op.Id)
+		delete(rsm.indexToOp, msg.CommandIndex)
 	}
 
 	if rsm.maxraftstate != -1 && rsm.persister.RaftStateSize() > rsm.maxraftstate {
@@ -151,8 +156,15 @@ func (rsm *RSM) handleSnapshot(msg raftapi.ApplyMsg) {
 	rsm.sm.Restore(msg.Snapshot)
 
 	rsm.lastApplied = msg.SnapshotIndex
+
+	// Remove notifyCh and pendingOps for indices included in snapshot
 	for index := range rsm.notifyCh {
 		if index <= rsm.lastApplied {
+			// If there's an op.Id mapped to this index, remove pendingOps too
+			if opId, ok := rsm.indexToOp[index]; ok {
+				delete(rsm.pendingOps, opId)
+				delete(rsm.indexToOp, index)
+			}
 			delete(rsm.notifyCh, index)
 		}
 	}
