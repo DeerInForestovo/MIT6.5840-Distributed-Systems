@@ -72,7 +72,7 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 		Req: req,
 	}
 
-	index, term, isLeader := rsm.rf.Start(op)
+	index, _, isLeader := rsm.rf.Start(op)
 	if !isLeader {
 		return rpc.ErrWrongLeader, nil
 	}
@@ -86,10 +86,6 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 
 	select {
 	case result := <-notifyCh:
-		curTerm, stillLeader := rsm.rf.GetState()
-		if !stillLeader || curTerm != term {
-			return rpc.ErrWrongLeader, nil
-		}
 		return rpc.OK, result
 	case <-time.After(2000 * time.Millisecond):
 		rsm.mu.Lock()
@@ -158,8 +154,9 @@ func (rsm *RSM) handleSnapshot(msg raftapi.ApplyMsg) {
 	rsm.lastApplied = msg.SnapshotIndex
 
 	// Remove notifyCh and pendingOps for indices included in snapshot
-	for index := range rsm.notifyCh {
+	for index, ch := range rsm.notifyCh {
 		if index <= rsm.lastApplied {
+			close(ch)
 			// If there's an op.Id mapped to this index, remove pendingOps too
 			if opId, ok := rsm.indexToOp[index]; ok {
 				delete(rsm.pendingOps, opId)

@@ -2,7 +2,6 @@ package kvraft
 
 import (
 	"bytes"
-	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -26,59 +25,62 @@ type KVServer struct {
 	lastPutResult     map[int64]rpc.PutReply
 }
 
+func (kv *KVServer) applyGet(args *rpc.GetArgs) rpc.GetReply {
+	val, ok := kv.data[args.Key]
+	if !ok {
+		return rpc.GetReply{Err: rpc.ErrNoKey}
+	}
+	ver := kv.version[args.Key]
+	return rpc.GetReply{Value: val, Version: ver, Err: rpc.OK}
+}
+
+// applyPut
+func (kv *KVServer) applyPut(args *rpc.PutArgs) rpc.PutReply {
+	clientId := args.ClientId
+	seqNum := args.SeqNum
+
+	if lastSeq, ok := kv.lastAppliedSeqNum[clientId]; ok {
+		if seqNum <= lastSeq {
+			return kv.lastPutResult[clientId]
+		}
+	}
+
+	ver, ok := kv.version[args.Key]
+	if !ok {
+		ver = 0
+	}
+	reply := rpc.PutReply{}
+	if args.Version != ver {
+		reply.Err = rpc.ErrVersion
+	} else {
+		kv.data[args.Key] = args.Value
+		kv.version[args.Key] = ver + 1
+		reply.Err = rpc.OK
+	}
+
+	if reply.Err == rpc.OK || reply.Err == rpc.ErrVersion {
+		kv.lastAppliedSeqNum[clientId] = seqNum
+		kv.lastPutResult[clientId] = reply
+	}
+
+	return reply
+}
+
 // DoOp applies the operation to the key-value store.
 func (kv *KVServer) DoOp(req any) any {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	// Tester Bug?
-	// Sometimes req is not a pointer type
-	rv := reflect.ValueOf(req)
-	if rv.Kind() != reflect.Pointer {
-		ptr := reflect.New(rv.Type())
-		ptr.Elem().Set(rv)
-		req = ptr.Interface()
-	}
-
 	switch args := req.(type) {
+	case rpc.GetArgs:
+		return kv.applyGet(&args)
 	case *rpc.GetArgs:
-		val, ok := kv.data[args.Key]
-		if !ok {
-			return rpc.GetReply{Err: rpc.ErrNoKey}
-		}
-		ver := kv.version[args.Key]
-		return rpc.GetReply{Value: val, Version: ver, Err: rpc.OK}
+		return kv.applyGet(args)
+	case rpc.PutArgs:
+		return kv.applyPut(&args)
 	case *rpc.PutArgs:
-		clientId := args.ClientId
-		seqNum := args.SeqNum
-
-		if lastSeq, ok := kv.lastAppliedSeqNum[clientId]; ok {
-			if seqNum <= lastSeq {
-				return kv.lastPutResult[clientId]
-			}
-		}
-
-		ver, ok := kv.version[args.Key]
-		if !ok {
-			ver = 0
-		}
-		reply := rpc.PutReply{}
-		if args.Version != ver {
-			reply.Err = rpc.ErrVersion
-		} else {
-			kv.data[args.Key] = args.Value
-			kv.version[args.Key] = ver + 1
-			reply.Err = rpc.OK
-		}
-
-		if reply.Err == rpc.OK || reply.Err == rpc.ErrVersion {
-			kv.lastAppliedSeqNum[clientId] = seqNum
-			kv.lastPutResult[clientId] = reply
-		}
-
-		return reply
+		return kv.applyPut(args)
 	}
-
 	// Should never reach here
 	return nil
 }

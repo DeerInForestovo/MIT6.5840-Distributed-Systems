@@ -685,6 +685,9 @@ func (rf *Raft) applier() {
 		rf.mu.Lock()
 		for rf.lastApplied < rf.commitIndex {
 			rf.lastApplied++
+			if rf.lastApplied <= rf.lastIncludedIndex {
+				continue
+			}
 			msg := raftapi.ApplyMsg{
 				CommandValid: true,
 				Command:      rf.log[rf.toSliceIndex(rf.lastApplied)].Command,
